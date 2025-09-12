@@ -28,6 +28,9 @@ public class HUDView: UIView, NibLoadable {
             stackView.widthAnchor.constraint(equalTo: widthAnchor),
             stackView.heightAnchor.constraint(equalTo: heightAnchor),
         ])
+        // Voeg Heart Rate HUD toe onder de bestaande HUDs
+        let heartRateHUD = HeartRateHUDView()
+        addHUDView(heartRateHUD)
     }
     
     public func removePumpManagerProvidedViews() {
