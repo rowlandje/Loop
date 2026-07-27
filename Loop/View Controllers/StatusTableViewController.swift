@@ -136,7 +136,9 @@ final class StatusTableViewController: LoopChartsTableViewController {
         if let gestureRecognizer = charts.gestureRecognizer {
             tableView.addGestureRecognizer(gestureRecognizer)
         }
-
+        
+        tableView.addGestureRecognizer(chartPanGestureRecognizer)
+        
         tableView.estimatedRowHeight = 74
 
         // Estimate an initial value
@@ -347,34 +349,91 @@ final class StatusTableViewController: LoopChartsTableViewController {
         deviceManager.cgmManager?.addStatusObserver(self, queue: .main)
     }
 
-    private func registerPumpManager() {
-        basalDeliveryState = deviceManager.pumpManager?.status.basalDeliveryState
-        bolusState = deviceManager.pumpManager?.status.bolusState ?? .noBolus
-        deviceManager.pumpManager?.removeStatusObserver(self)
-        deviceManager.pumpManager?.addStatusObserver(self, queue: .main)
-    }
-    
-    private lazy var statusCharts = StatusChartsManager(colors: .primary, settings: .default, traitCollection: traitCollection)
+    private lazy var statusCharts = StatusChartsManager(
+        colors: .primary,
+        settings: .default,
+        traitCollection: traitCollection
+    )
+
+    /// Verschil ten opzichte van het standaardvenster.
+    /// 0 = vier uur historie en vier uur toekomst.
+    /// Een negatieve waarde toont oudere gegevens.
+    private var chartTimeOffset: TimeInterval = 0
+
+    private let chartWindowHours = 8.0
+
+    private lazy var chartPanGestureRecognizer: UIPanGestureRecognizer = {
+        let recognizer = UIPanGestureRecognizer(
+            target: self,
+            action: #selector(handleChartPan(_:))
+        )
+        recognizer.delegate = self
+        recognizer.cancelsTouchesInView = false
+        return recognizer
+    }()
 
     override func createChartsManager() -> ChartsManager {
         return statusCharts
     }
 
     private func updateChartDateRange() {
-        // How far back should we show data? Use the screen size as a guide.
         let historyHours = 4.0
-        let totalHours = 8.0
 
-        let date = Date(timeIntervalSinceNow: -TimeInterval(hours: historyHours))
-        let chartStartDate = Calendar.current.nextDate(after: date, matching: DateComponents(minute: 0), matchingPolicy: .strict, direction: .backward) ?? date
+        let date = Date(
+            timeIntervalSinceNow:
+                -TimeInterval(hours: historyHours)
+                + chartTimeOffset
+        )
+
+        let chartStartDate =
+            Calendar.current.nextDate(
+                after: date,
+                matching: DateComponents(minute: 0),
+                matchingPolicy: .strict,
+                direction: .backward
+            ) ?? date
+
         if charts.startDate != chartStartDate {
             refreshContext.formUnion(RefreshContext.all)
         }
+
         charts.startDate = chartStartDate
-        charts.maxEndDate = chartStartDate.addingTimeInterval(.hours(totalHours))
+        charts.maxEndDate = chartStartDate.addingTimeInterval(
+            .hours(chartWindowHours)
+        )
         charts.updateEndDate(charts.maxEndDate)
     }
 
+    @objc private func handleChartPan(
+        _ recognizer: UIPanGestureRecognizer
+    ) {
+        guard recognizer.state == .ended else {
+            return
+        }
+
+        let translation = recognizer.translation(in: tableView)
+        let minimumSwipeDistance: CGFloat = 60
+
+        guard abs(translation.x) >= minimumSwipeDistance else {
+            return
+        }
+
+        let windowDuration = TimeInterval(hours: chartWindowHours)
+
+        if translation.x > 0 {
+            // Naar rechts slepen: oudere gegevens tonen.
+            chartTimeOffset -= windowDuration
+        } else {
+            // Naar links slepen: terug richting het actuele venster.
+            chartTimeOffset = min(
+                0,
+                chartTimeOffset + windowDuration
+            )
+        }
+
+        refreshContext.formUnion(RefreshContext.all)
+        reloadData(animated: false)
+    }
     override func reloadData(animated: Bool = false) {
         dispatchPrecondition(condition: .onQueue(.main))
 
@@ -2265,5 +2324,34 @@ extension StatusTableViewController: ServicesViewModelDelegate {
         settingsViewController.serviceOnboardingDelegate = deviceManager.servicesManager
         settingsViewController.completionDelegate = self
         show(settingsViewController, sender: self)
+    }
+}
+// MARK: - UIGestureRecognizerDelegate
+
+extension StatusTableViewController: UIGestureRecognizerDelegate {
+
+    func gestureRecognizerShouldBegin(
+        _ gestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        guard gestureRecognizer === chartPanGestureRecognizer,
+              let panGestureRecognizer =
+                gestureRecognizer as? UIPanGestureRecognizer
+        else {
+            return true
+        }
+
+        let velocity = panGestureRecognizer.velocity(in: tableView)
+
+        // Alleen starten als de beweging duidelijk horizontaal is.
+        return abs(velocity.x) > abs(velocity.y)
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith
+            otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        return gestureRecognizer === chartPanGestureRecognizer
+            || otherGestureRecognizer === chartPanGestureRecognizer
     }
 }
