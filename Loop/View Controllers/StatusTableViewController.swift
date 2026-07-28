@@ -164,6 +164,16 @@ final class StatusTableViewController: LoopChartsTableViewController {
         }
         
         tableView.addGestureRecognizer(chartPanGestureRecognizer)
+
+        let chartDoubleTapRecognizer = UITapGestureRecognizer(
+            target: self,
+            action: #selector(handleChartDoubleTap(_:))
+        )
+
+        chartDoubleTapRecognizer.numberOfTapsRequired = 2
+        chartDoubleTapRecognizer.cancelsTouchesInView = false
+
+        tableView.addGestureRecognizer(chartDoubleTapRecognizer)
         
         tableView.estimatedRowHeight = 74
 
@@ -1304,6 +1314,55 @@ final class StatusTableViewController: LoopChartsTableViewController {
         }
     }
 
+    @objc private func handleChartDoubleTap(
+    _ recognizer: UITapGestureRecognizer
+) {
+    guard recognizer.state == .ended else {
+        return
+    }
+
+    let location = recognizer.location(in: tableView)
+
+    guard
+        let indexPath = tableView.indexPathForRow(at: location),
+        Section(rawValue: indexPath.section) == .charts
+    else {
+        return
+    }
+
+    openChartDetails(at: indexPath)
+}
+
+private func openChartDetails(at indexPath: IndexPath) {
+    guard let chartRow = ChartRow(rawValue: indexPath.row) else {
+        return
+    }
+
+    switch chartRow {
+    case .glucose:
+        if automaticDosingStatus.automaticDosingEnabled ||
+            !FeatureFlags.simpleBolusCalculatorEnabled
+        {
+            performSegue(
+                withIdentifier: PredictionTableViewController.className,
+                sender: indexPath
+            )
+        }
+
+    case .iob, .dose:
+        performSegue(
+            withIdentifier: InsulinDeliveryTableViewController.className,
+            sender: indexPath
+        )
+
+    case .cob:
+        performSegue(
+            withIdentifier: CarbAbsorptionViewController.className,
+            sender: indexPath
+        )
+    }
+}
+
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         switch Section(rawValue: indexPath.section)! {
         case .alertWarning:
@@ -1376,19 +1435,11 @@ final class StatusTableViewController: LoopChartsTableViewController {
                     break
                 }
             }
-        case .charts:
-            switch ChartRow(rawValue: indexPath.row)! {
-            case .glucose:
-                if automaticDosingStatus.automaticDosingEnabled || !FeatureFlags.simpleBolusCalculatorEnabled {
-                    performSegue(withIdentifier: PredictionTableViewController.className, sender: indexPath)
-                }
-            case .iob, .dose:
-                performSegue(withIdentifier: InsulinDeliveryTableViewController.className, sender: indexPath)
-            case .cob:
-                performSegue(withIdentifier: CarbAbsorptionViewController.className, sender: indexPath)
-            }
-        }
-    }
+    case .charts:
+        tableView.deselectRow(
+        at: indexPath,
+        animated: false
+    )
 
     private func presentUnmuteAlertConfirmation() {
         let title = NSLocalizedString("Unmute Alerts?", comment: "The alert title for unmute alert confirmation")
