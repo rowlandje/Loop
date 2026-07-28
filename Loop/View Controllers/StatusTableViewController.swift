@@ -375,6 +375,19 @@ final class StatusTableViewController: LoopChartsTableViewController {
         deviceManager.cgmManager?.addStatusObserver(self, queue: .main)
     }
 
+    private func registerPumpManager() {
+        basalDeliveryState =
+            deviceManager.pumpManager?.status.basalDeliveryState
+        bolusState =
+            deviceManager.pumpManager?.status.bolusState ?? .noBolus
+
+        deviceManager.pumpManager?.removeStatusObserver(self)
+        deviceManager.pumpManager?.addStatusObserver(
+            self,
+            queue: .main
+        )
+    }
+    
     private lazy var statusCharts = StatusChartsManager(
         colors: .primary,
         settings: .default,
