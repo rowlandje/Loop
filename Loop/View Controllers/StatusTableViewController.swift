@@ -25,6 +25,32 @@ private extension RefreshContext {
     static let all: Set<RefreshContext> = [.status, .glucose, .insulin, .carbs, .targets]
 }
 
+private final class ChartPanGestureDelegate: NSObject, UIGestureRecognizerDelegate {
+
+    func gestureRecognizerShouldBegin(
+        _ gestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        guard let panGestureRecognizer =
+                gestureRecognizer as? UIPanGestureRecognizer,
+              let view = gestureRecognizer.view
+        else {
+            return true
+        }
+
+        let velocity = panGestureRecognizer.velocity(in: view)
+
+        return abs(velocity.x) > abs(velocity.y)
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith
+            otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        return true
+    }
+}
+
 final class StatusTableViewController: LoopChartsTableViewController {
 
     private let log = OSLog(category: "StatusTableViewController")
@@ -362,13 +388,17 @@ final class StatusTableViewController: LoopChartsTableViewController {
 
     private let chartWindowHours = 8.0
 
+    private let chartPanGestureDelegate = ChartPanGestureDelegate()
+
     private lazy var chartPanGestureRecognizer: UIPanGestureRecognizer = {
         let recognizer = UIPanGestureRecognizer(
             target: self,
             action: #selector(handleChartPan(_:))
         )
-        recognizer.delegate = self
+
+        recognizer.delegate = chartPanGestureDelegate
         recognizer.cancelsTouchesInView = false
+
         return recognizer
     }()
 
@@ -2324,34 +2354,5 @@ extension StatusTableViewController: ServicesViewModelDelegate {
         settingsViewController.serviceOnboardingDelegate = deviceManager.servicesManager
         settingsViewController.completionDelegate = self
         show(settingsViewController, sender: self)
-    }
-}
-// MARK: - UIGestureRecognizerDelegate
-
-extension StatusTableViewController: UIGestureRecognizerDelegate {
-
-    func gestureRecognizerShouldBegin(
-        _ gestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        guard gestureRecognizer === chartPanGestureRecognizer,
-              let panGestureRecognizer =
-                gestureRecognizer as? UIPanGestureRecognizer
-        else {
-            return true
-        }
-
-        let velocity = panGestureRecognizer.velocity(in: tableView)
-
-        // Alleen starten als de beweging duidelijk horizontaal is.
-        return abs(velocity.x) > abs(velocity.y)
-    }
-
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith
-            otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        return gestureRecognizer === chartPanGestureRecognizer
-            || otherGestureRecognizer === chartPanGestureRecognizer
     }
 }
