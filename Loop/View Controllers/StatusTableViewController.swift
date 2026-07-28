@@ -410,7 +410,7 @@ final class StatusTableViewController: LoopChartsTableViewController {
     
     private var chartTimeOffset: TimeInterval = 0
     private let chartWindowHours = 8.0
-    private let chartStepHours: Double = 5
+    private let chartStepHours: Double = 6
 
     private let chartPanGestureDelegate = ChartPanGestureDelegate()
 
