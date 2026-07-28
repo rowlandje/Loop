@@ -397,9 +397,10 @@ final class StatusTableViewController: LoopChartsTableViewController {
     /// Verschil ten opzichte van het standaardvenster.
     /// 0 = vier uur historie en vier uur toekomst.
     /// Een negatieve waarde toont oudere gegevens.
+    
     private var chartTimeOffset: TimeInterval = 0
-
     private let chartWindowHours = 8.0
+    private let chartStepHours: Double = 5
 
     private let chartPanGestureDelegate = ChartPanGestureDelegate()
 
@@ -462,15 +463,16 @@ final class StatusTableViewController: LoopChartsTableViewController {
         }
 
         let windowDuration = TimeInterval(hours: chartWindowHours)
-
+        let stepDuration = TimeInterval(hours: chartStepHours)
+        
         if translation.x > 0 {
             // Naar rechts slepen: oudere gegevens tonen.
-            chartTimeOffset -= windowDuration
+            chartTimeOffset -= stepDuration
         } else {
             // Naar links slepen: terug richting het actuele venster.
             chartTimeOffset = min(
                 0,
-                chartTimeOffset + windowDuration
+                chartTimeOffset + stepDuration
             )
         }
 
