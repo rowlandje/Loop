@@ -1435,11 +1435,13 @@ private func openChartDetails(at indexPath: IndexPath) {
                     break
                 }
             }
-    case .charts:
-        tableView.deselectRow(
-        at: indexPath,
-        animated: false
-    )
+            case .charts:
+                tableView.deselectRow(
+                at: indexPath,
+                animated: false
+            )
+         }
+    }
 
     private func presentUnmuteAlertConfirmation() {
         let title = NSLocalizedString("Unmute Alerts?", comment: "The alert title for unmute alert confirmation")
