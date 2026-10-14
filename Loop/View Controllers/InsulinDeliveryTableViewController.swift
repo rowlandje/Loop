@@ -18,6 +18,25 @@ public final class InsulinDeliveryTableViewController: UITableViewController {
     
     private static let historicDataDisplayTimeInterval = TimeInterval.hours(24)
 
+    private static let dailyTotalDays = 7
+
+    private var dailyTotals: [(date: Date, units: Double?)] = []
+    private var isLoadingDailyTotals = false
+
+    private lazy var dailyTotalDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.setLocalizedDateFormatFromTemplate("EEE d MMM")
+    return formatter
+}()
+
+private lazy var dailyTotalNumberFormatter: NumberFormatter = {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.minimumFractionDigits = 0
+    formatter.maximumFractionDigits = 1
+    return formatter
+}()
+
     @IBOutlet var needsConfigurationMessageView: ErrorBackgroundView!
 
     @IBOutlet weak var iobValueLabel: UILabel! {
@@ -257,6 +276,7 @@ public final class InsulinDeliveryTableViewController: UITableViewController {
                     self.updateTotal()
                 }
             case .history:
+                updateDailyTotals()
                 doseStore?.getPumpEventValues(since: sinceDate) { (result) in
                     DispatchQueue.main.async { () -> Void in
                         switch result {
@@ -355,6 +375,90 @@ public final class InsulinDeliveryTableViewController: UITableViewController {
         }
     }
 
+    private func updateDailyTotals() {
+    guard !isLoadingDailyTotals, let doseStore = doseStore else {
+        return
+    }
+
+    isLoadingDailyTotals = true
+
+    let calendar = Calendar.current
+    let today = calendar.startOfDay(for: Date())
+
+    let startDates: [Date] = (0..<InsulinDeliveryTableViewController.dailyTotalDays).compactMap {
+        calendar.date(byAdding: .day, value: -$0, to: today)
+    }
+
+    let group = DispatchGroup()
+    let lock = NSLock()
+
+    var cumulativeTotals: [Date: (value: Double, startDate: Date)] = [:]
+
+    for startDate in startDates {
+        group.enter()
+
+        doseStore.getTotalUnitsDelivered(since: startDate) { result in
+            if case .success(let total) = result {
+                lock.lock()
+                cumulativeTotals[startDate] = (
+                    value: total.value,
+                    startDate: total.startDate
+                )
+                lock.unlock()
+            }
+
+            group.leave()
+        }
+    }
+
+    group.notify(queue: .main) {
+        var totals: [(date: Date, units: Double?)] = []
+
+        for index in startDates.indices {
+            let dayStart = startDates[index]
+
+            guard let current = cumulativeTotals[dayStart] else {
+                totals.append((date: dayStart, units: nil))
+                continue
+            }
+
+            let currentStartMatches =
+                abs(current.startDate.timeIntervalSince(dayStart)) < 60
+
+            guard currentStartMatches else {
+                totals.append((date: dayStart, units: nil))
+                continue
+            }
+
+            if index == 0 {
+                // Vandaag: totaal vanaf 00:00 tot nu
+                totals.append((date: dayStart, units: current.value))
+            } else {
+                let nextDayStart = startDates[index - 1]
+
+                guard let next = cumulativeTotals[nextDayStart] else {
+                    totals.append((date: dayStart, units: nil))
+                    continue
+                }
+
+                let nextStartMatches =
+                    abs(next.startDate.timeIntervalSince(nextDayStart)) < 60
+
+                guard nextStartMatches else {
+                    totals.append((date: dayStart, units: nil))
+                    continue
+                }
+
+                let units = max(0, current.value - next.value)
+                totals.append((date: dayStart, units: units))
+            }
+        }
+
+        self.dailyTotals = totals
+        self.isLoadingDailyTotals = false
+        self.tableView.reloadData()
+    }
+}
     @IBAction func selectedSegmentChanged(_ sender: Any) {
         reloadData()
     }
@@ -411,28 +515,98 @@ public final class InsulinDeliveryTableViewController: UITableViewController {
 
     // MARK: - Table view data source
 
+        
+
     public override func numberOfSections(in tableView: UITableView) -> Int {
         switch state {
         case .unknown, .unavailable:
             return 0
+
         case .display:
-            return 1
+            if DataSourceSegment(rawValue: dataSourceSegmentedControl.selectedSegmentIndex) == .history {
+                return 2
+            } else {
+                return 1
+            }
         }
     }
 
     public override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+
+        if DataSourceSegment(rawValue: dataSourceSegmentedControl.selectedSegmentIndex) == .history,
+           section == 0
+        {
+            return dailyTotals.count
+        }
+
         switch values {
         case .reservoir(let values):
             return values.count
+
         case .history(let values):
             return values.count
+
         case .manualEntryDoses(let values):
             return values.count
         }
     }
 
+    public override func tableView(
+        _ tableView: UITableView,
+        titleForHeaderInSection section: Int
+    ) -> String? {
+
+        guard DataSourceSegment(rawValue: dataSourceSegmentedControl.selectedSegmentIndex) == .history else {
+            return nil
+        }
+
+        switch section {
+        case 0:
+            return "Dagelijks insulineverbruik"
+        case 1:
+            return "Logboek"
+        default:
+            return nil
+        }
+    }
+
     public override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: ReuseIdentifier, for: indexPath)
+        if DataSourceSegment(rawValue: dataSourceSegmentedControl.selectedSegmentIndex) == .history,
+   indexPath.section == 0
+{
+    let total = dailyTotals[indexPath.row]
+
+    cell.textLabel?.attributedText = nil
+
+    if Calendar.current.isDateInToday(total.date) {
+        cell.textLabel?.text = NSLocalizedString(
+            "Today",
+            comment: "Label for today's daily insulin total"
+        )
+    } else if Calendar.current.isDateInYesterday(total.date) {
+        cell.textLabel?.text = NSLocalizedString(
+            "Yesterday",
+            comment: "Label for yesterday's daily insulin total"
+        )
+    } else {
+        cell.textLabel?.text = dailyTotalDateFormatter.string(from: total.date)
+    }
+
+    if let units = total.units,
+       let formatted = dailyTotalNumberFormatter.string(from: NSNumber(value: units))
+    {
+        cell.detailTextLabel?.text = "\(formatted) E"
+    } else {
+        cell.detailTextLabel?.text = "—"
+    }
+
+    cell.textLabel?.textColor = .label
+    cell.accessoryType = .none
+    cell.selectionStyle = .none
+
+    return cell
+}
 
         if case .display = state {
             switch self.values {
@@ -476,9 +650,15 @@ public final class InsulinDeliveryTableViewController: UITableViewController {
         return cell
     }
 
-    public override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
-        return enableEntryDeletion
+public override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
+    if DataSourceSegment(rawValue: dataSourceSegmentedControl.selectedSegmentIndex) == .history,
+       indexPath.section == 0
+    {
+        return false
     }
+
+    return enableEntryDeletion
+}
 
     public override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
         if editingStyle == .delete, case .display = state {
@@ -532,6 +712,10 @@ public final class InsulinDeliveryTableViewController: UITableViewController {
     }
 
     public override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        if DataSourceSegment(rawValue: dataSourceSegmentedControl.selectedSegmentIndex) == .history, indexPath.section == 0 {
+            tableView.deselectRow(at: indexPath, animated: true)
+            return
+        }
         if case .display = state, case .history(let history) = values {
             let entry = history[indexPath.row]
 
