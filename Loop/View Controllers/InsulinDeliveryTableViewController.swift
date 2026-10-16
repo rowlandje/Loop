@@ -7,6 +7,7 @@
 //
 
 import UIKit
+import CoreData
 import LoopCore
 import LoopKit
 import LoopKitUI
@@ -843,3 +844,95 @@ extension PersistedPumpEvent {
 }
 
 extension InsulinDeliveryTableViewController: IdentifiableClass { }
+// MARK: - Daily Insulin History
+
+private final class DailyInsulinStore {
+
+    private var persistentContainer: NSPersistentContainer?
+    private var managedObjectContext: NSManagedObjectContext?
+
+    init() {
+        let model = NSManagedObjectModel()
+
+        let entity = NSEntityDescription()
+        entity.name = "DailyInsulinRecord"
+        entity.managedObjectClassName = "NSManagedObject"
+
+        let dayAttribute = NSAttributeDescription()
+        dayAttribute.name = "day"
+        dayAttribute.attributeType = .dateAttributeType
+        dayAttribute.isOptional = false
+
+        let totalUnitsAttribute = NSAttributeDescription()
+        totalUnitsAttribute.name = "totalUnits"
+        totalUnitsAttribute.attributeType = .doubleAttributeType
+        totalUnitsAttribute.isOptional = false
+
+        let createdAtAttribute = NSAttributeDescription()
+        createdAtAttribute.name = "createdAt"
+        createdAtAttribute.attributeType = .dateAttributeType
+        createdAtAttribute.isOptional = false
+
+        entity.properties = [
+            dayAttribute,
+            totalUnitsAttribute,
+            createdAtAttribute
+        ]
+
+        entity.uniquenessConstraints = [["day"]]
+        model.entities = [entity]
+
+        let container = NSPersistentContainer(
+            name: "DailyInsulinStore",
+            managedObjectModel: model
+        )
+
+        let storeDescription = NSPersistentStoreDescription()
+
+        guard let applicationSupportURL = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            return
+        }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: applicationSupportURL,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            return
+        }
+
+        storeDescription.url = applicationSupportURL
+            .appendingPathComponent("DailyInsulinStore.sqlite")
+
+        storeDescription.shouldMigrateStoreAutomatically = true
+        storeDescription.shouldInferMappingModelAutomatically = true
+
+        container.persistentStoreDescriptions = [storeDescription]
+
+        let group = DispatchGroup()
+        group.enter()
+
+        var loadError: Error?
+
+        container.loadPersistentStores { _, error in
+            loadError = error
+            group.leave()
+        }
+
+        group.wait()
+
+        guard loadError == nil else {
+            return
+        }
+
+        let context = container.newBackgroundContext()
+        context.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+
+        persistentContainer = container
+        managedObjectContext = context
+    }
+}
