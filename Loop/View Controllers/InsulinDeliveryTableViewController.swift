@@ -935,4 +935,77 @@ private final class DailyInsulinStore {
         persistentContainer = container
         managedObjectContext = context
     }
+        enum StoreError: Error {
+        case unavailable
+    }
+
+    func contains(day: Date, completion: @escaping (Result<Bool, Error>) -> Void) {
+        guard let context = managedObjectContext else {
+            completion(.failure(StoreError.unavailable))
+            return
+        }
+
+        let normalizedDay = Calendar.current.startOfDay(for: day)
+
+        context.perform {
+            let request = NSFetchRequest<NSManagedObject>(entityName: "DailyInsulinRecord")
+            request.predicate = NSPredicate(format: "day == %@", normalizedDay as NSDate)
+            request.fetchLimit = 1
+
+            do {
+                let count = try context.count(for: request)
+                completion(.success(count > 0))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+    }
+
+    func save(day: Date, totalUnits: Double, completion: @escaping (Result<Void, Error>) -> Void) {
+        guard let context = managedObjectContext else {
+            completion(.failure(StoreError.unavailable))
+            return
+        }
+
+        guard totalUnits >= 0, totalUnits.isFinite else {
+            completion(.failure(StoreError.unavailable))
+            return
+        }
+
+        let normalizedDay = Calendar.current.startOfDay(for: day)
+
+        context.perform {
+            let request = NSFetchRequest<NSManagedObject>(entityName: "DailyInsulinRecord")
+            request.predicate = NSPredicate(format: "day == %@", normalizedDay as NSDate)
+            request.fetchLimit = 1
+
+            do {
+                let existing = try context.fetch(request)
+
+                // Dag bestaat al: niets wijzigen.
+                if !existing.isEmpty {
+                    completion(.success(()))
+                    return
+                }
+
+                guard let entity = NSEntityDescription.entity(
+                    forEntityName: "DailyInsulinRecord",
+                    in: context
+                ) else {
+                    completion(.failure(StoreError.unavailable))
+                    return
+                }
+
+                let record = NSManagedObject(entity: entity, insertInto: context)
+                record.setValue(normalizedDay, forKey: "day")
+                record.setValue(totalUnits, forKey: "totalUnits")
+                record.setValue(Date(), forKey: "createdAt")
+
+                try context.save()
+                completion(.success(()))
+            } catch {
+                completion(.failure(error))
+            }
+        }
+    }
 }
