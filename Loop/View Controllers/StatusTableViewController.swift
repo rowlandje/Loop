@@ -198,6 +198,9 @@ final class StatusTableViewController: LoopChartsTableViewController {
         deviceManager.analyticsServicesManager.didDisplayStatusScreen()
 
         deviceManager.checkDeliveryUncertaintyState()
+
+        // Record completed daily insulin totals when the main screen is shown.
+        DailyInsulinHistoryRecorder.shared.check(doseStore: deviceManager.doseStore)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -225,6 +228,9 @@ final class StatusTableViewController: LoopChartsTableViewController {
         didSet {
             hudView?.loopCompletionHUD.assertTimer(active)
             updateHUDActive()
+            if active {
+                DailyInsulinHistoryRecorder.shared.check(doseStore: deviceManager.doseStore)
+            }
         }
     }
 
