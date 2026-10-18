@@ -939,7 +939,7 @@ private final class DailyInsulinStore {
         case unavailable
     }
 
-    func contains(day: Date, completion: @escaping (Result<Bool, Error>) -> Void) {
+    func contains(day: Date, completion: @escaping (Swift.Result<Bool, Error>) -> Void) {
         guard let context = managedObjectContext else {
             completion(.failure(StoreError.unavailable))
             return
@@ -961,7 +961,7 @@ private final class DailyInsulinStore {
         }
     }
 
-    func save(day: Date, totalUnits: Double, completion: @escaping (Result<Void, Error>) -> Void) {
+    func save(day: Date, totalUnits: Double, completion: @escaping (Swift.Result<Void, Error>) -> Void) {
         guard let context = managedObjectContext else {
             completion(.failure(StoreError.unavailable))
             return
