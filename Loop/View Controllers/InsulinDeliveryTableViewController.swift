@@ -23,6 +23,8 @@ public final class InsulinDeliveryTableViewController: UITableViewController {
 
     private var dailyTotals: [(date: Date, units: Double?)] = []
     private var isLoadingDailyTotals = false
+   
+    private lazy var dailyInsulinStore = DailyInsulinStore()
 
     private lazy var dailyTotalDateFormatter: DateFormatter = {
     let formatter = DateFormatter()
@@ -372,6 +374,60 @@ private lazy var dailyTotalNumberFormatter: NumberFormatter = {
         willSet {
             if let observer = doseStoreObserver {
                 NotificationCenter.default.removeObserver(observer)
+            }
+        }
+    }
+    
+    // MARK: - Daily insulin history (diagnostic only)
+    // Do not persist historical totals until source-data completeness is verified.
+    private func checkMissingDailyInsulinRecords() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+
+        for daysAgo in 1...6 {
+            guard let day = calendar.date(byAdding: .day, value: -daysAgo, to: today),
+                  let nextDay = calendar.date(byAdding: .day, value: 1, to: day)
+            else {
+                continue
+            }
+
+            dailyInsulinStore.contains(day: day) { [weak self] result in
+                switch result {
+                case .failure(let error):
+                    NSLog("DailyInsulin: lookup failed: %@", String(describing: error))
+
+                case .success(let exists):
+                    guard !exists, let doseStore = self?.doseStore else { return }
+
+                    doseStore.getTotalUnitsDelivered(since: day) { firstResult in
+                        guard case .success(let first) = firstResult else {
+                            NSLog("DailyInsulin: start query failed")
+                            return
+                        }
+
+                        doseStore.getTotalUnitsDelivered(since: nextDay) { secondResult in
+                            guard case .success(let second) = secondResult else {
+                                NSLog("DailyInsulin: end query failed")
+                                return
+                            }
+
+                            guard abs(first.startDate.timeIntervalSince(day)) < 60,
+                                  abs(second.startDate.timeIntervalSince(nextDay)) < 60 else {
+                                NSLog("DailyInsulin: date mismatch")
+                                return
+                            }
+
+                            let units = first.value - second.value
+                            guard units.isFinite, units >= 0 else {
+                                NSLog("DailyInsulin: invalid total")
+                                return
+                            }
+
+                            NSLog("DailyInsulin: candidate day=%@ total=%.2f E (not saved)",
+                                  String(describing: day), units)
+                        }
+                    }
+                }
             }
         }
     }
@@ -844,6 +900,7 @@ extension PersistedPumpEvent {
 }
 
 extension InsulinDeliveryTableViewController: IdentifiableClass { }
+
 // MARK: - Daily Insulin History
 
 private final class DailyInsulinStore {
@@ -935,7 +992,8 @@ private final class DailyInsulinStore {
         persistentContainer = container
         managedObjectContext = context
     }
-        enum StoreError: Error {
+
+    enum StoreError: Error {
         case unavailable
     }
 
@@ -972,7 +1030,14 @@ private final class DailyInsulinStore {
             return
         }
 
-        let normalizedDay = Calendar.current.startOfDay(for: day)
+        let calendar = Calendar.current
+        let normalizedDay = calendar.startOfDay(for: day)
+        let today = calendar.startOfDay(for: Date())
+
+        guard normalizedDay < today else {
+            completion(.failure(StoreError.unavailable))
+            return
+        }
 
         context.perform {
             let request = NSFetchRequest<NSManagedObject>(entityName: "DailyInsulinRecord")
