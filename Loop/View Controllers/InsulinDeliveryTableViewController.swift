@@ -22,6 +22,8 @@ public final class InsulinDeliveryTableViewController: UITableViewController {
     private static let dailyTotalDays = 7
 
     private var dailyTotals: [(date: Date, units: Double?)] = []
+    private var storedDailyTotals: [(day: Date, units: Double)] = []
+    private lazy var dailyInsulinViewerStore = DailyInsulinStore()
     private var isLoadingDailyTotals = false
    
 
@@ -280,6 +282,7 @@ private lazy var dailyTotalNumberFormatter: NumberFormatter = {
                 }
             case .history:
                 updateDailyTotals()
+                loadStoredDailyTotals()
                 doseStore?.getPumpEventValues(since: sinceDate) { (result) in
                     DispatchQueue.main.async { () -> Void in
                         switch result {
@@ -384,6 +387,21 @@ private lazy var dailyTotalNumberFormatter: NumberFormatter = {
         DailyInsulinHistoryRecorder.shared.check(doseStore: doseStore)
     }
 
+    private func loadStoredDailyTotals() {
+        dailyInsulinViewerStore.fetchAll { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let totals):
+                    self.storedDailyTotals = totals
+                    self.tableView.reloadData()
+
+                case .failure(let error):
+                    NSLog("DailyInsulin viewer error: %@", String(describing: error))
+                }
+            }
+        }
+    }
+    
     private func updateDailyTotals() {
     guard !isLoadingDailyTotals, let doseStore = doseStore else {
         return
@@ -545,7 +563,7 @@ private lazy var dailyTotalNumberFormatter: NumberFormatter = {
         if DataSourceSegment(rawValue: dataSourceSegmentedControl.selectedSegmentIndex) == .history,
            section == 0
         {
-            return dailyTotals.count
+            return dailyTotals.count + 1 + storedDailyTotals.count
         }
 
         switch values {
@@ -584,6 +602,32 @@ private lazy var dailyTotalNumberFormatter: NumberFormatter = {
         if DataSourceSegment(rawValue: dataSourceSegmentedControl.selectedSegmentIndex) == .history,
    indexPath.section == 0
 {
+    if indexPath.row >= dailyTotals.count {
+    let storedIndex = indexPath.row - dailyTotals.count - 1
+
+    cell.textLabel?.attributedText = nil
+    cell.textLabel?.textColor = .label
+    cell.accessoryType = .none
+    cell.selectionStyle = .none
+
+    if storedIndex == -1 {
+        cell.textLabel?.text = "Opgeslagen in database"
+        cell.detailTextLabel?.text = "\(storedDailyTotals.count) dagen"
+    } else {
+        let record = storedDailyTotals[storedIndex]
+        cell.textLabel?.text = dailyTotalDateFormatter.string(from: record.day)
+
+        if let formatted = dailyTotalNumberFormatter.string(
+            from: NSNumber(value: record.units)
+        ) {
+            cell.detailTextLabel?.text = "\(formatted) E"
+        } else {
+            cell.detailTextLabel?.text = "—"
+        }
+    }
+
+    return cell
+}
     let total = dailyTotals[indexPath.row]
 
     cell.textLabel?.attributedText = nil
@@ -1035,6 +1079,38 @@ fileprivate final class DailyInsulinStore {
         case unavailable
     }
 
+func fetchAll(
+    completion: @escaping (Swift.Result<[(day: Date, units: Double)], Error>) -> Void
+) {
+    guard let context = managedObjectContext else {
+        completion(.failure(StoreError.unavailable))
+        return
+    }
+
+    context.perform {
+        let request = NSFetchRequest<NSManagedObject>(
+            entityName: "DailyInsulinRecord"
+        )
+        request.sortDescriptors = [
+            NSSortDescriptor(key: "day", ascending: false)
+        ]
+
+        do {
+            let records = try context.fetch(request)
+            let totals = records.compactMap { record -> (day: Date, units: Double)? in
+                guard let day = record.value(forKey: "day") as? Date,
+                      let units = record.value(forKey: "totalUnits") as? Double
+                else {
+                    return nil
+                }
+                return (day: day, units: units)
+            }
+            completion(.success(totals))
+        } catch {
+            completion(.failure(error))
+        }
+    }
+}
     func contains(day: Date, completion: @escaping (Swift.Result<Bool, Error>) -> Void) {
         guard let context = managedObjectContext else {
             completion(.failure(StoreError.unavailable))
